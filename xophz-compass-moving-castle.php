@@ -17,7 +17,7 @@
  * Plugin Name:       Xophz Your Moving Castle 
  * Plugin URI:        http://www.mycompassconsulting.com/
  * Description:       Open your door to many ventures, markets, and brands without moving your site. 
- * Version:           0.0.1
+ * Version:           26.4.11
  * Author:            Hall of the Gods, Inc.
  * Author URI:        http://www.midnightnerd.com/
  * License:           GPL-2.0+
@@ -36,7 +36,7 @@ if ( ! defined( 'WPINC' ) ) {
  * Start at version 1.0.0 and use SemVer - https://semver.org
  * Rename this for your plugin and update it as you release new versions.
  */
-define( 'XOPHZ_COMPASS_MOVING_CASTLE_VERSION', '1.0.0' );
+define( 'XOPHZ_COMPASS_MOVING_CASTLE_VERSION', '26.4.11' );
 
 /**
  * The code that runs during plugin activation.

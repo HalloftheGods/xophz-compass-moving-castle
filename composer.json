@@ -1,0 +1,21 @@
+{
+  "name": "hallofthegods/xophz-compass-moving-castle",
+  "description": "Open your door to many ventures, markets, and brands without moving your site.",
+  "version": "26.4.11",
+  "type": "wordpress-plugin",
+  "license": "GPL-2.0-or-later",
+  "authors": [
+    {
+      "name": "Hall of the Gods, Inc.",
+      "homepage": "https://www.hallofthegods.com"
+    }
+  ],
+  "require": {
+    "composer/installers": "^1.0 || ^2.0"
+  },
+  "autoload": {
+    "files": [
+      "xophz-compass-moving-castle.php"
+    ]
+  }
+}

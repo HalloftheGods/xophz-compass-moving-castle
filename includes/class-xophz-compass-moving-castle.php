@@ -191,6 +191,11 @@ class Xophz_Compass_Moving_Castle {
 	private function define_api_hooks() {
 		$plugin_api = new Xophz_Compass_Moving_Castle_API();
 		$this->loader->add_action( 'rest_api_init', $plugin_api, 'register_routes' );
+		$this->loader->add_action( 'mc_cleanup_stale_zips', $plugin_api, 'cleanup_stale_zips' );
+
+		if ( ! wp_next_scheduled( 'mc_cleanup_stale_zips' ) ) {
+			wp_schedule_event( time(), 'hourly', 'mc_cleanup_stale_zips' );
+		}
 	}
 
 	/**

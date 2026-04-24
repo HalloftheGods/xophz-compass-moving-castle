@@ -58,6 +58,30 @@ class Xophz_Compass_Moving_Castle_API {
 				}
 			)
 		));
+
+		register_rest_route( 'moving-castle/v1', '/files/prepare', array(
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'prepare_files' ),
+				'permission_callback' => '__return_true',
+			)
+		));
+
+		register_rest_route( 'moving-castle/v1', '/files/download', array(
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'download_files' ),
+				'permission_callback' => '__return_true',
+			)
+		));
+
+		register_rest_route( 'moving-castle/v1', '/files/cleanup', array(
+			array(
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'cleanup_files' ),
+				'permission_callback' => '__return_true',
+			)
+		));
 	}
 
 	private $cipher_key  = 'XophzCompass_MC_SecureKey_Omega26';
@@ -451,6 +475,162 @@ class Xophz_Compass_Moving_Castle_API {
 		return array( 'size' => $size, 'count' => $count );
 	}
 
+	private function resolve_uploads_dir( $site_id, $is_standalone ) {
+		$is_subsite = ! $is_standalone && $site_id > 1;
+		if ( $is_subsite ) {
+			return WP_CONTENT_DIR . '/uploads/sites/' . $site_id;
+		}
+		return wp_upload_dir()['basedir'];
+	}
+
+	private function get_tmp_zip_path( $token, $type ) {
+		return sys_get_temp_dir() . '/mc-' . $type . '-' . md5( $token ) . '.zip';
+	}
+
+	private function filter_media_files( $dir, $token_data ) {
+		$time_range = isset( $token_data['mediaTimeRange'] ) ? $token_data['mediaTimeRange'] : 'all';
+		if ( $time_range === 'all' ) return null;
+
+		$now = time();
+		$cutoff_start = 0;
+		$cutoff_end   = $now;
+
+		if ( $time_range === '30d' ) {
+			$cutoff_start = $now - ( 30 * DAY_IN_SECONDS );
+		} elseif ( $time_range === '1y' ) {
+			$cutoff_start = $now - ( 365 * DAY_IN_SECONDS );
+		} elseif ( $time_range === 'range' ) {
+			$start_date = isset( $token_data['mediaStartDate'] ) ? $token_data['mediaStartDate'] : '';
+			$end_date   = isset( $token_data['mediaEndDate'] ) ? $token_data['mediaEndDate'] : '';
+			if ( $start_date ) $cutoff_start = strtotime( $start_date );
+			if ( $end_date )   $cutoff_end   = strtotime( $end_date ) + DAY_IN_SECONDS;
+		}
+
+		return array( 'start' => $cutoff_start, 'end' => $cutoff_end );
+	}
+
+	public function prepare_files( $request ) {
+		$token_data = $this->validate_token( $request );
+		if ( ! $token_data ) {
+			return new WP_Error( 'invalid_token', 'Invalid or expired token.', array( 'status' => 403 ) );
+		}
+
+		$type = sanitize_text_field( $request->get_param( 'type' ) );
+		if ( ! in_array( $type, array( 'media', 'themes', 'plugins' ), true ) ) {
+			return new WP_Error( 'invalid_type', 'Invalid file type.', array( 'status' => 400 ) );
+		}
+
+		$site_id       = $token_data['site_id'];
+		$is_standalone = ! empty( $token_data['standalone'] );
+		$token         = sanitize_text_field( $request->get_param( 'token' ) );
+		$zip_path      = $this->get_tmp_zip_path( $token, $type );
+
+		$zip_already_exists = file_exists( $zip_path );
+		if ( $zip_already_exists ) {
+			$zip = new ZipArchive();
+			$zip->open( $zip_path );
+			$cached_count = $zip->numFiles;
+			$zip->close();
+
+			return rest_ensure_response( $this->encrypt_payload( array(
+				'success'    => true,
+				'type'       => $type,
+				'file_count' => $cached_count,
+				'zip_size'   => filesize( $zip_path ),
+				'cached'     => true,
+			) ) );
+		}
+
+		if ( $type === 'media' ) {
+			$source_dir  = $this->resolve_uploads_dir( $site_id, $is_standalone );
+			$time_filter = $this->filter_media_files( $source_dir, $token_data );
+		} else {
+			return new WP_Error( 'not_implemented', 'This file type is not yet supported.', array( 'status' => 501 ) );
+		}
+
+		if ( ! is_dir( $source_dir ) ) {
+			return new WP_Error( 'dir_missing', 'Source directory does not exist: ' . basename( $source_dir ), array( 'status' => 404 ) );
+		}
+
+		$zip = new ZipArchive();
+		if ( $zip->open( $zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE ) !== true ) {
+			return new WP_Error( 'zip_failed', 'Could not create ZIP archive.', array( 'status' => 500 ) );
+		}
+
+		$file_count = 0;
+		$iterator   = new RecursiveIteratorIterator(
+			new RecursiveDirectoryIterator( $source_dir, FilesystemIterator::SKIP_DOTS )
+		);
+
+		foreach ( $iterator as $file ) {
+			if ( ! $file->isFile() ) continue;
+
+			if ( $time_filter ) {
+				$mtime = $file->getMTime();
+				$is_outside_range = ( $mtime < $time_filter['start'] || $mtime > $time_filter['end'] );
+				if ( $is_outside_range ) continue;
+			}
+
+			$relative_path = substr( $file->getPathname(), strlen( $source_dir ) + 1 );
+			$zip->addFile( $file->getPathname(), $relative_path );
+			$file_count++;
+		}
+
+		$zip->close();
+
+		$zip_size = file_exists( $zip_path ) ? filesize( $zip_path ) : 0;
+
+		return rest_ensure_response( $this->encrypt_payload( array(
+			'success'    => true,
+			'type'       => $type,
+			'file_count' => $file_count,
+			'zip_size'   => $zip_size,
+		) ) );
+	}
+
+	public function download_files( $request ) {
+		$token_data = $this->validate_token( $request );
+		if ( ! $token_data ) {
+			return new WP_Error( 'invalid_token', 'Invalid or expired token.', array( 'status' => 403 ) );
+		}
+
+		$type     = sanitize_text_field( $request->get_param( 'type' ) );
+		$token    = sanitize_text_field( $request->get_param( 'token' ) );
+		$zip_path = $this->get_tmp_zip_path( $token, $type );
+
+		if ( ! file_exists( $zip_path ) ) {
+			return new WP_Error( 'zip_missing', 'ZIP file not found. Run prepare first.', array( 'status' => 404 ) );
+		}
+
+		header( 'Content-Type: application/zip' );
+		header( 'Content-Disposition: attachment; filename="mc-' . $type . '.zip"' );
+		header( 'Content-Length: ' . filesize( $zip_path ) );
+		readfile( $zip_path );
+		exit;
+	}
+
+	public function cleanup_files( $request ) {
+		$token_data = $this->validate_token( $request );
+		if ( ! $token_data ) {
+			return new WP_Error( 'invalid_token', 'Invalid or expired token.', array( 'status' => 403 ) );
+		}
+
+		$type     = sanitize_text_field( $request->get_param( 'type' ) );
+		$token    = sanitize_text_field( $request->get_param( 'token' ) );
+		$zip_path = $this->get_tmp_zip_path( $token, $type );
+		$deleted  = false;
+
+		if ( file_exists( $zip_path ) ) {
+			$deleted = unlink( $zip_path );
+		}
+
+		return rest_ensure_response( array(
+			'success' => true,
+			'deleted' => $deleted,
+			'path'    => basename( $zip_path )
+		) );
+	}
+
 	public function get_data( $request ) {
 		global $wpdb;
 
@@ -592,17 +772,16 @@ class Xophz_Compass_Moving_Castle_API {
 					if ( $origin_prefix && $local_table !== $table ) {
 						$create_sql = str_replace( "`{$table}`", "`{$local_table}`", $create_sql );
 					}
-					// Ensure a clean slate for an exact clone
 					$wpdb->query( "DROP TABLE IF EXISTS `{$local_table}`" );
 					$wpdb->query( $create_sql );
 				}
 				$msg = $is_dry ? 'Schema parsed (dry run).' : 'Schema synced.';
-				return rest_ensure_response( array( 'success' => true, 'message' => $msg ) );
+				return rest_ensure_response( array( 'success' => true, 'message' => $msg, 'row_count' => 0 ) );
 			}
 
 			$rows = $body['data'];
 			if ( empty( $rows ) ) {
-				return rest_ensure_response( array( 'success' => true, 'message' => 'Table complete.', 'done' => true ) );
+				return rest_ensure_response( array( 'success' => true, 'message' => 'Table complete.', 'done' => true, 'row_count' => 0 ) );
 			}
 
 			if ( ! $is_dry ) {
@@ -611,13 +790,111 @@ class Xophz_Compass_Moving_Castle_API {
 				}
 			}
 
+			$row_count = count( $rows );
 			return rest_ensure_response( array(
-				'success' => true,
-				'message' => ( $is_dry ? 'Simulated ' : 'Synced ' ) . count( $rows ) . ' rows.',
-				'done'    => count( $rows ) < 1000
+				'success'   => true,
+				'message'   => ( $is_dry ? 'Simulated ' : 'Synced ' ) . $row_count . ' rows.',
+				'row_count' => $row_count,
+				'done'      => $row_count < 1000
+			));
+		}
+
+		if ( $task === 'pull_media' ) {
+			$prepare_url = $base_url . '/wp-json/moving-castle/v1/files/prepare?token=' . $token . '&type=media';
+			$prep_response = wp_remote_get( $prepare_url, array( 'timeout' => 300 ) );
+
+			if ( is_wp_error( $prep_response ) ) {
+				return new WP_Error( 'prepare_failed', 'Could not prepare media ZIP: ' . $prep_response->get_error_message(), array( 'status' => 500 ) );
+			}
+
+			$prep_raw  = json_decode( wp_remote_retrieve_body( $prep_response ), true );
+			$prep_body = $this->decrypt_payload( $prep_raw );
+
+			if ( empty( $prep_body['success'] ) ) {
+				return new WP_Error( 'prepare_failed', 'Source failed to create media archive.', array( 'status' => 500 ) );
+			}
+
+			$source_file_count = $prep_body['file_count'];
+			$source_zip_size   = $prep_body['zip_size'];
+
+			if ( $is_dry ) {
+				return rest_ensure_response( array(
+					'success'    => true,
+					'message'    => 'Dry run: ' . $source_file_count . ' media files (' . size_format( $source_zip_size ) . ' compressed). ZIP cached for live run.',
+					'file_count' => $source_file_count,
+					'zip_size'   => $source_zip_size,
+				));
+			}
+
+			$download_url = $base_url . '/wp-json/moving-castle/v1/files/download?token=' . $token . '&type=media';
+			$local_zip    = sys_get_temp_dir() . '/mc-import-media-' . md5( $token ) . '.zip';
+
+			$download_response = wp_remote_get( $download_url, array(
+				'timeout'  => 600,
+				'stream'   => true,
+				'filename' => $local_zip,
+			) );
+
+			if ( is_wp_error( $download_response ) ) {
+				$this->remote_cleanup( $base_url, $token, 'media' );
+				return new WP_Error( 'download_failed', 'Could not download media ZIP: ' . $download_response->get_error_message(), array( 'status' => 500 ) );
+			}
+
+			$uploads_dir = wp_upload_dir()['basedir'];
+
+			WP_Filesystem();
+			$unzip_result = unzip_file( $local_zip, $uploads_dir );
+
+			if ( file_exists( $local_zip ) ) {
+				unlink( $local_zip );
+			}
+
+			$this->remote_cleanup( $base_url, $token, 'media' );
+
+			if ( is_wp_error( $unzip_result ) ) {
+				return new WP_Error( 'extract_failed', 'Could not extract media ZIP: ' . $unzip_result->get_error_message(), array( 'status' => 500 ) );
+			}
+
+			return rest_ensure_response( array(
+				'success'    => true,
+				'message'    => 'Media transfer complete. ' . $source_file_count . ' files (' . size_format( $source_zip_size ) . ').',
+				'file_count' => $source_file_count,
+				'zip_size'   => $source_zip_size,
 			));
 		}
 
 		return new WP_Error( 'invalid_task', 'Invalid task specified.', array( 'status' => 400 ) );
+	}
+
+	private function remote_cleanup( $base_url, $token, $type ) {
+		wp_remote_post( $base_url . '/wp-json/moving-castle/v1/files/cleanup', array(
+			'timeout' => 15,
+			'body'    => wp_json_encode( array( 'token' => $token, 'type' => $type ) ),
+			'headers' => array( 'Content-Type' => 'application/json' ),
+		) );
+	}
+
+	public function cleanup_stale_zips() {
+		$tmp_dir   = sys_get_temp_dir();
+		$max_age   = 3600;
+		$pattern   = $tmp_dir . '/mc-*.zip';
+		$zip_files = glob( $pattern );
+
+		if ( ! is_array( $zip_files ) ) return;
+
+		$now     = time();
+		$deleted = 0;
+
+		foreach ( $zip_files as $file ) {
+			$is_stale = ( $now - filemtime( $file ) ) > $max_age;
+			if ( $is_stale ) {
+				unlink( $file );
+				$deleted++;
+			}
+		}
+
+		if ( $deleted > 0 ) {
+			error_log( '[Moving Castle] Cleaned up ' . $deleted . ' stale ZIP file(s) from tmp.' );
+		}
 	}
 }

@@ -350,10 +350,13 @@ class Xophz_Compass_Moving_Castle_API {
 				? WP_CONTENT_DIR . '/uploads/sites/' . $site_id
 				: wp_upload_dir()['basedir'];
 
+			$media_info = is_dir( $uploads_dir ) ? $this->get_dir_info( $uploads_dir ) : array( 'size' => 0, 'count' => 0 );
+			
 			$manifest['media'] = array(
 				'path'           => $uploads_dir,
 				'exists'         => is_dir( $uploads_dir ),
-				'size'           => is_dir( $uploads_dir ) ? $this->get_dir_size( $uploads_dir ) : 0,
+				'size'           => $media_info['size'],
+				'file_count'     => $media_info['count'],
 				'time_range'     => isset( $token_data['mediaTimeRange'] ) ? $token_data['mediaTimeRange'] : 'all',
 				'start_date'     => isset( $token_data['mediaStartDate'] ) ? $token_data['mediaStartDate'] : '',
 				'end_date'       => isset( $token_data['mediaEndDate'] ) ? $token_data['mediaEndDate'] : ''
@@ -412,7 +415,8 @@ class Xophz_Compass_Moving_Castle_API {
 				$theme_dir = WP_CONTENT_DIR . '/themes/' . $theme_slug;
 				if ( is_dir( $theme_dir ) ) {
 					$exists = true;
-					$size += $this->get_dir_size( $theme_dir );
+					$info = $this->get_dir_info( $theme_dir );
+					$size += $info['size'];
 				}
 			}
 
@@ -428,15 +432,23 @@ class Xophz_Compass_Moving_Castle_API {
 		return $manifest;
 	}
 
-	private function get_dir_size( $dir ) {
+	private function get_dir_info( $dir ) {
 		$size = 0;
-		$iterator = new RecursiveIteratorIterator(
-			new RecursiveDirectoryIterator( $dir, FilesystemIterator::SKIP_DOTS )
-		);
-		foreach ( $iterator as $file ) {
-			$size += $file->getSize();
+		$count = 0;
+		try {
+			$iterator = new RecursiveIteratorIterator(
+				new RecursiveDirectoryIterator( $dir, FilesystemIterator::SKIP_DOTS )
+			);
+			foreach ( $iterator as $file ) {
+				if ( $file->isFile() ) {
+					$size += $file->getSize();
+					$count++;
+				}
+			}
+		} catch ( Exception $e ) {
+			// Ignore read errors
 		}
-		return $size;
+		return array( 'size' => $size, 'count' => $count );
 	}
 
 	public function get_data( $request ) {
@@ -567,10 +579,22 @@ class Xophz_Compass_Moving_Castle_API {
 
 			global $wpdb;
 
+			$origin_prefix = isset( $params['origin_prefix'] ) ? sanitize_text_field( $params['origin_prefix'] ) : '';
+			$local_table   = $table;
+			
+			if ( $origin_prefix && strpos( $table, $origin_prefix ) === 0 ) {
+				$local_table = $wpdb->prefix . substr( $table, strlen( $origin_prefix ) );
+			}
+
 			if ( $page === 0 ) {
 				if ( ! empty( $body['create_schema'] ) && ! $is_dry ) {
-					// We need to remap the table prefix to local. Pending implementation.
-					// $wpdb->query( $body['create_schema'] );
+					$create_sql = $body['create_schema'];
+					if ( $origin_prefix && $local_table !== $table ) {
+						$create_sql = str_replace( "`{$table}`", "`{$local_table}`", $create_sql );
+					}
+					// Ensure a clean slate for an exact clone
+					$wpdb->query( "DROP TABLE IF EXISTS `{$local_table}`" );
+					$wpdb->query( $create_sql );
 				}
 				$msg = $is_dry ? 'Schema parsed (dry run).' : 'Schema synced.';
 				return rest_ensure_response( array( 'success' => true, 'message' => $msg ) );
@@ -582,7 +606,9 @@ class Xophz_Compass_Moving_Castle_API {
 			}
 
 			if ( ! $is_dry ) {
-				// In a full implementation, we run REPLACE INTO statements here.
+				foreach ( $rows as $row ) {
+					$wpdb->replace( $local_table, $row );
+				}
 			}
 
 			return rest_ensure_response( array(

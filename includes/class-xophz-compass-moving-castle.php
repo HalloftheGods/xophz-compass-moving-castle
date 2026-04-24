@@ -78,6 +78,7 @@ class Xophz_Compass_Moving_Castle {
 		$this->set_locale();
 		$this->define_admin_hooks();
 		$this->define_public_hooks();
+		$this->define_api_hooks();
 
 	}
 
@@ -121,6 +122,11 @@ class Xophz_Compass_Moving_Castle {
 		 * side of the site.
 		 */
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'public/class-xophz-compass-moving-castle-public.php';
+
+		/**
+		 * The class responsible for defining the REST API.
+		 */
+		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-xophz-compass-moving-castle-api.php';
 
 		$this->loader = new Xophz_Compass_Moving_Castle_Loader();
 
@@ -174,6 +180,17 @@ class Xophz_Compass_Moving_Castle {
 		// $this->loader->add_action( 'wp_enqueue_scripts', $plugin_public, 'enqueue_styles' );
 		// $this->loader->add_action( 'wp_enqueue_scripts', $plugin_public, 'enqueue_scripts' );
 
+	}
+
+	/**
+	 * Register all of the hooks related to the REST API.
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 */
+	private function define_api_hooks() {
+		$plugin_api = new Xophz_Compass_Moving_Castle_API();
+		$this->loader->add_action( 'rest_api_init', $plugin_api, 'register_routes' );
 	}
 
 	/**

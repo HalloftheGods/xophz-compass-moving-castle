@@ -128,6 +128,8 @@ class Xophz_Compass_Moving_Castle {
 		 */
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-xophz-compass-moving-castle-api.php';
 
+		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-xophz-compass-moving-castle-magic-door.php';
+
 		$this->loader = new Xophz_Compass_Moving_Castle_Loader();
 
 	}
@@ -196,6 +198,10 @@ class Xophz_Compass_Moving_Castle {
 		if ( ! wp_next_scheduled( 'mc_cleanup_stale_zips' ) ) {
 			wp_schedule_event( time(), 'hourly', 'mc_cleanup_stale_zips' );
 		}
+
+		$magic_door = new Xophz_Compass_Moving_Castle_Magic_Door();
+		$this->loader->add_action( 'rest_api_init', $magic_door, 'register_routes' );
+		$this->loader->add_action( 'setup_theme', $magic_door, 'apply_theme_override' );
 	}
 
 	/**

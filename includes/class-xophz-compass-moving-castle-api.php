@@ -261,7 +261,7 @@ class Xophz_Compass_Moving_Castle_API {
 		$params  = $request->get_json_params();
 		$site_id = isset( $params['site_id'] ) ? absint( $params['site_id'] ) : 0;
 
-		$allowed_scopes = array( 'database', 'media', 'plugins', 'themes' );
+		$allowed_scopes = array( 'database', 'media', 'plugins', 'themes', 'includeOptions', 'includeUsers' );
 		$raw_scope      = isset( $params['scope'] ) && is_array( $params['scope'] ) ? $params['scope'] : array( 'database' );
 		$scope          = array_values( array_intersect( $raw_scope, $allowed_scopes ) );
 

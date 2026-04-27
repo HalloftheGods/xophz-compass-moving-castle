@@ -201,11 +201,17 @@ class Xophz_Compass_Moving_Castle_API {
 			$details = get_blog_details( $site->blog_id );
 			$stats   = $this->get_site_stats( $site->blog_id, false );
 
+			$theme_obj  = wp_get_theme( get_blog_option( $site->blog_id, 'stylesheet' ) );
+			$theme_name = $theme_obj->get( 'Name' );
+			if ( $theme_obj->parent() ) {
+				$theme_name = 'Parent: ' . $theme_obj->parent()->get( 'Name' ) . ', Child: ' . $theme_name;
+			}
+
 			$response[] = array(
 				'id'            => $site->blog_id,
 				'name'          => $details->blogname,
 				'domain'        => $site->domain . $site->path,
-				'theme'         => get_blog_option( $site->blog_id, 'stylesheet' ),
+				'theme'         => $theme_name,
 				'type'          => 'subsite',
 				'color'         => 'cyan',
 				'status'        => 'Active',
@@ -224,7 +230,12 @@ class Xophz_Compass_Moving_Castle_API {
 	private function get_current_site( $is_subsite = false ) {
 		$site_url  = get_site_url();
 		$site_name = get_bloginfo( 'name' );
-		$theme     = wp_get_theme()->get( 'Name' );
+		
+		$theme_obj  = wp_get_theme();
+		$theme_name = $theme_obj->get( 'Name' );
+		if ( $theme_obj->parent() ) {
+			$theme_name = 'Parent: ' . $theme_obj->parent()->get( 'Name' ) . ', Child: ' . $theme_name;
+		}
 
 		$site_id = 0;
 		$mode    = 'standalone';
@@ -245,7 +256,7 @@ class Xophz_Compass_Moving_Castle_API {
 					'id'            => $site_id,
 					'name'          => $site_name,
 					'domain'        => wp_parse_url( $site_url, PHP_URL_HOST ),
-					'theme'         => $theme,
+					'theme'         => $theme_name,
 					'type'          => $type,
 					'color'         => 'cyan',
 					'status'        => 'Active',
@@ -261,7 +272,7 @@ class Xophz_Compass_Moving_Castle_API {
 		$params  = $request->get_json_params();
 		$site_id = isset( $params['site_id'] ) ? absint( $params['site_id'] ) : 0;
 
-		$allowed_scopes = array( 'database', 'media', 'plugins', 'themes', 'includeOptions', 'includeUsers' );
+		$allowed_scopes = array( 'database', 'media', 'plugins', 'themes', 'mu-plugins', 'languages', 'others', 'includeOptions', 'includeUsers' );
 		$raw_scope      = isset( $params['scope'] ) && is_array( $params['scope'] ) ? $params['scope'] : array( 'database' );
 		$scope          = array_values( array_intersect( $raw_scope, $allowed_scopes ) );
 
@@ -469,6 +480,88 @@ class Xophz_Compass_Moving_Castle_API {
 			);
 		}
 
+		$has_mu_plugins_scope = in_array( 'mu-plugins', $scope, true );
+		if ( $has_mu_plugins_scope ) {
+			$mu_dir = defined( 'WPMU_PLUGIN_DIR' ) ? WPMU_PLUGIN_DIR : WP_CONTENT_DIR . '/mu-plugins';
+			if ( is_dir( $mu_dir ) ) {
+				$info = $this->get_dir_info( $mu_dir );
+				$manifest['mu-plugins'] = array(
+					'path'       => $mu_dir,
+					'exists'     => true,
+					'size'       => $info['size'],
+					'file_count' => $info['count']
+				);
+			}
+		}
+
+		$has_languages_scope = in_array( 'languages', $scope, true );
+		if ( $has_languages_scope ) {
+			$lang_dir = defined( 'WP_LANG_DIR' ) ? WP_LANG_DIR : WP_CONTENT_DIR . '/languages';
+			if ( is_dir( $lang_dir ) ) {
+				$info = $this->get_dir_info( $lang_dir );
+				$manifest['languages'] = array(
+					'path'       => $lang_dir,
+					'exists'     => true,
+					'size'       => $info['size'],
+					'file_count' => $info['count']
+				);
+			}
+		}
+
+		$has_others_scope = in_array( 'others', $scope, true );
+		if ( $has_others_scope ) {
+			$others_dir = WP_CONTENT_DIR;
+			$excludes = array(
+				WP_CONTENT_DIR . '/plugins',
+				WP_CONTENT_DIR . '/themes',
+				WP_CONTENT_DIR . '/uploads',
+				WP_CONTENT_DIR . '/mu-plugins',
+				WP_CONTENT_DIR . '/languages',
+				WP_CONTENT_DIR . '/upgrade',
+				WP_CONTENT_DIR . '/cache',
+			);
+
+			$size = 0;
+			$count = 0;
+			$exists = false;
+
+			if ( is_dir( $others_dir ) ) {
+				$iterator = new DirectoryIterator( $others_dir );
+				foreach ( $iterator as $fileinfo ) {
+					if ( $fileinfo->isDot() ) continue;
+					$path = $fileinfo->getPathname();
+					
+					$is_excluded = false;
+					foreach ( $excludes as $exclude ) {
+						if ( strpos( $path, $exclude ) === 0 ) {
+							$is_excluded = true;
+							break;
+						}
+					}
+					if ( $is_excluded ) continue;
+
+					$exists = true;
+					if ( $fileinfo->isDir() ) {
+						$info = $this->get_dir_info( $path );
+						$size += $info['size'];
+						$count += $info['count'];
+					} else {
+						$size += $fileinfo->getSize();
+						$count++;
+					}
+				}
+
+				if ( $exists ) {
+					$manifest['others'] = array(
+						'path'       => $others_dir,
+						'exists'     => true,
+						'size'       => $size,
+						'file_count' => $count
+					);
+				}
+			}
+		}
+
 		return $manifest;
 	}
 
@@ -577,7 +670,8 @@ class Xophz_Compass_Moving_Castle_API {
 		}
 
 		$type = sanitize_text_field( $request->get_param( 'type' ) );
-		if ( ! in_array( $type, array( 'media', 'themes', 'plugins' ), true ) ) {
+		$allowed_types = array( 'media', 'themes', 'plugins', 'mu-plugins', 'languages', 'others' );
+		if ( ! in_array( $type, $allowed_types, true ) ) {
 			return new WP_Error( 'invalid_type', 'Invalid file type.', array( 'status' => 400 ) );
 		}
 
@@ -585,125 +679,230 @@ class Xophz_Compass_Moving_Castle_API {
 		$is_standalone = ! empty( $token_data['standalone'] );
 		$token         = sanitize_text_field( $request->get_param( 'token' ) );
 		$zip_path      = $this->get_tmp_zip_path( $token, $type );
+		$manifest_path = $zip_path . '.manifest';
 
-		$zip_already_exists = file_exists( $zip_path );
-		if ( $zip_already_exists ) {
-			$zip = new ZipArchive();
-			$zip->open( $zip_path );
-			$cached_count = $zip->numFiles;
-			$zip->close();
+		$offset    = absint( $request->get_param( 'offset' ) ?: 0 );
+		$is_resume = $offset > 0;
+		$is_fresh  = ! empty( $request->get_param( 'fresh' ) );
 
-			return rest_ensure_response( $this->encrypt_payload( array(
-				'success'    => true,
-				'type'       => $type,
-				'file_count' => $cached_count,
-				'zip_size'   => filesize( $zip_path ),
-				'cached'     => true,
-			) ) );
+		if ( file_exists( $zip_path ) && ! $is_resume ) {
+			if ( $is_fresh ) {
+				unlink( $zip_path );
+				if ( file_exists( $manifest_path ) ) {
+					unlink( $manifest_path );
+				}
+			} else {
+				$zip = new ZipArchive();
+				if ( $zip->open( $zip_path ) === true ) {
+					$cached_count = $zip->numFiles;
+					$zip->close();
+
+					return rest_ensure_response( $this->encrypt_payload( array(
+						'success'    => true,
+						'type'       => $type,
+						'file_count' => $cached_count,
+						'zip_size'   => filesize( $zip_path ),
+						'cached'     => true,
+						'done'       => true,
+					) ) );
+				}
+			}
 		}
 
-		if ( $type === 'media' ) {
-			$source_dir  = $this->resolve_uploads_dir( $site_id, $is_standalone );
-			$time_filter = $this->filter_media_files( $source_dir, $token_data );
+		$start_time = microtime( true );
+		$max_execution_time = apply_filters( 'moving_castle_max_execution_time', 5 ); // 5 seconds default chunk limit
 
-			if ( ! is_dir( $source_dir ) ) {
-				return new WP_Error( 'dir_missing', 'Uploads directory does not exist.', array( 'status' => 404 ) );
-			}
+		// Generate manifest if it doesn't exist
+		if ( ! file_exists( $manifest_path ) ) {
+			$manifest_handle = fopen( $manifest_path, 'w' );
+			$total_files     = 0;
 
-			$zip = new ZipArchive();
-			if ( $zip->open( $zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE ) !== true ) {
-				return new WP_Error( 'zip_failed', 'Could not create ZIP archive.', array( 'status' => 500 ) );
-			}
+			if ( $type === 'media' ) {
+				$source_dir  = $this->resolve_uploads_dir( $site_id, $is_standalone );
+				$time_filter = $this->filter_media_files( $source_dir, $token_data );
 
-			$file_count = 0;
-			$iterator   = new RecursiveIteratorIterator(
-				new RecursiveDirectoryIterator( $source_dir, FilesystemIterator::SKIP_DOTS )
-			);
-
-			foreach ( $iterator as $file ) {
-				if ( ! $file->isFile() ) continue;
-
-				if ( $time_filter ) {
-					$mtime = $file->getMTime();
-					$is_outside_range = ( $mtime < $time_filter['start'] || $mtime > $time_filter['end'] );
-					if ( $is_outside_range ) continue;
+				if ( is_dir( $source_dir ) ) {
+					$iterator = new RecursiveIteratorIterator(
+						new RecursiveDirectoryIterator( $source_dir, FilesystemIterator::SKIP_DOTS )
+					);
+					foreach ( $iterator as $file ) {
+						if ( ! $file->isFile() ) continue;
+						if ( $time_filter ) {
+							$mtime = $file->getMTime();
+							if ( $mtime < $time_filter['start'] || $mtime > $time_filter['end'] ) continue;
+						}
+						$relative = substr( $file->getPathname(), strlen( $source_dir ) + 1 );
+						fputcsv( $manifest_handle, array( $file->getPathname(), $relative ) );
+						$total_files++;
+					}
 				}
+			} elseif ( $type === 'themes' ) {
+				$active_themes = $this->resolve_active_themes( $site_id, $is_standalone );
+				foreach ( $active_themes as $theme_slug ) {
+					$theme_dir = WP_CONTENT_DIR . '/themes/' . $theme_slug;
+					if ( ! is_dir( $theme_dir ) ) continue;
 
-				$relative_path = substr( $file->getPathname(), strlen( $source_dir ) + 1 );
-				$zip->addFile( $file->getPathname(), $relative_path );
-				$file_count++;
-			}
+					$iterator = new RecursiveIteratorIterator(
+						new RecursiveDirectoryIterator( $theme_dir, FilesystemIterator::SKIP_DOTS )
+					);
+					foreach ( $iterator as $file ) {
+						if ( ! $file->isFile() ) continue;
+						$relative = $theme_slug . '/' . substr( $file->getPathname(), strlen( $theme_dir ) + 1 );
+						fputcsv( $manifest_handle, array( $file->getPathname(), $relative ) );
+						$total_files++;
+					}
+				}
+			} elseif ( $type === 'plugins' ) {
+				$active_plugins = $this->resolve_active_plugins( $site_id, $is_standalone );
+				foreach ( $active_plugins as $plugin_slug ) {
+					$plugin_dir = WP_CONTENT_DIR . '/plugins/' . $plugin_slug;
+					if ( ! is_dir( $plugin_dir ) ) continue;
 
-			$zip->close();
-
-		} elseif ( $type === 'themes' ) {
-			$active_themes = $this->resolve_active_themes( $site_id, $is_standalone );
-
-			if ( empty( $active_themes ) ) {
-				return new WP_Error( 'no_themes', 'No active themes found.', array( 'status' => 404 ) );
-			}
-
-			$zip = new ZipArchive();
-			if ( $zip->open( $zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE ) !== true ) {
-				return new WP_Error( 'zip_failed', 'Could not create ZIP archive.', array( 'status' => 500 ) );
-			}
-
-			$file_count = 0;
-			foreach ( $active_themes as $theme_slug ) {
-				$theme_dir = WP_CONTENT_DIR . '/themes/' . $theme_slug;
-				if ( ! is_dir( $theme_dir ) ) continue;
-
-				$iterator = new RecursiveIteratorIterator(
-					new RecursiveDirectoryIterator( $theme_dir, FilesystemIterator::SKIP_DOTS )
+					$iterator = new RecursiveIteratorIterator(
+						new RecursiveDirectoryIterator( $plugin_dir, FilesystemIterator::SKIP_DOTS )
+					);
+					foreach ( $iterator as $file ) {
+						if ( ! $file->isFile() ) continue;
+						$relative = $plugin_slug . '/' . substr( $file->getPathname(), strlen( $plugin_dir ) + 1 );
+						fputcsv( $manifest_handle, array( $file->getPathname(), $relative ) );
+						$total_files++;
+					}
+				}
+			} elseif ( $type === 'mu-plugins' ) {
+				$source_dir = defined( 'WPMU_PLUGIN_DIR' ) ? WPMU_PLUGIN_DIR : WP_CONTENT_DIR . '/mu-plugins';
+				if ( is_dir( $source_dir ) ) {
+					$iterator = new RecursiveIteratorIterator(
+						new RecursiveDirectoryIterator( $source_dir, FilesystemIterator::SKIP_DOTS )
+					);
+					foreach ( $iterator as $file ) {
+						if ( ! $file->isFile() ) continue;
+						$relative = substr( $file->getPathname(), strlen( $source_dir ) + 1 );
+						fputcsv( $manifest_handle, array( $file->getPathname(), $relative ) );
+						$total_files++;
+					}
+				}
+			} elseif ( $type === 'languages' ) {
+				$source_dir = defined( 'WP_LANG_DIR' ) ? WP_LANG_DIR : WP_CONTENT_DIR . '/languages';
+				if ( is_dir( $source_dir ) ) {
+					$iterator = new RecursiveIteratorIterator(
+						new RecursiveDirectoryIterator( $source_dir, FilesystemIterator::SKIP_DOTS )
+					);
+					foreach ( $iterator as $file ) {
+						if ( ! $file->isFile() ) continue;
+						$relative = substr( $file->getPathname(), strlen( $source_dir ) + 1 );
+						fputcsv( $manifest_handle, array( $file->getPathname(), $relative ) );
+						$total_files++;
+					}
+				}
+			} elseif ( $type === 'others' ) {
+				$others_dir = WP_CONTENT_DIR;
+				$excludes = array(
+					WP_CONTENT_DIR . '/plugins',
+					WP_CONTENT_DIR . '/themes',
+					WP_CONTENT_DIR . '/uploads',
+					WP_CONTENT_DIR . '/mu-plugins',
+					WP_CONTENT_DIR . '/languages',
+					WP_CONTENT_DIR . '/upgrade',
+					WP_CONTENT_DIR . '/cache',
 				);
-				foreach ( $iterator as $file ) {
-					if ( ! $file->isFile() ) continue;
-					$relative_path = $theme_slug . '/' . substr( $file->getPathname(), strlen( $theme_dir ) + 1 );
-					$zip->addFile( $file->getPathname(), $relative_path );
-					$file_count++;
+
+				if ( is_dir( $others_dir ) ) {
+					$dir_iterator = new DirectoryIterator( $others_dir );
+					foreach ( $dir_iterator as $fileinfo ) {
+						if ( $fileinfo->isDot() ) continue;
+						$path = $fileinfo->getPathname();
+						
+						$is_excluded = false;
+						foreach ( $excludes as $exclude ) {
+							if ( strpos( $path, $exclude ) === 0 ) {
+								$is_excluded = true;
+								break;
+							}
+						}
+						if ( $is_excluded ) continue;
+
+						if ( $fileinfo->isDir() ) {
+							$iterator = new RecursiveIteratorIterator(
+								new RecursiveDirectoryIterator( $path, FilesystemIterator::SKIP_DOTS )
+							);
+							foreach ( $iterator as $file ) {
+								if ( ! $file->isFile() ) continue;
+								$relative = substr( $file->getPathname(), strlen( $others_dir ) + 1 );
+								fputcsv( $manifest_handle, array( $file->getPathname(), $relative ) );
+								$total_files++;
+							}
+						} else {
+							$relative = substr( $fileinfo->getPathname(), strlen( $others_dir ) + 1 );
+							fputcsv( $manifest_handle, array( $fileinfo->getPathname(), $relative ) );
+							$total_files++;
+						}
+					}
 				}
 			}
 
-			$zip->close();
-
-		} elseif ( $type === 'plugins' ) {
-			$active_plugins = $this->resolve_active_plugins( $site_id, $is_standalone );
-
-			if ( empty( $active_plugins ) ) {
-				return new WP_Error( 'no_plugins', 'No active plugins found.', array( 'status' => 404 ) );
-			}
-
-			$zip = new ZipArchive();
-			if ( $zip->open( $zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE ) !== true ) {
-				return new WP_Error( 'zip_failed', 'Could not create ZIP archive.', array( 'status' => 500 ) );
-			}
-
-			$file_count = 0;
-			foreach ( $active_plugins as $plugin_slug ) {
-				$plugin_dir = WP_CONTENT_DIR . '/plugins/' . $plugin_slug;
-				if ( ! is_dir( $plugin_dir ) ) continue;
-
-				$iterator = new RecursiveIteratorIterator(
-					new RecursiveDirectoryIterator( $plugin_dir, FilesystemIterator::SKIP_DOTS )
-				);
-				foreach ( $iterator as $file ) {
-					if ( ! $file->isFile() ) continue;
-					$relative_path = $plugin_slug . '/' . substr( $file->getPathname(), strlen( $plugin_dir ) + 1 );
-					$zip->addFile( $file->getPathname(), $relative_path );
-					$file_count++;
-				}
-			}
-
-			$zip->close();
+			fclose( $manifest_handle );
 		}
 
-		$zip_size = file_exists( $zip_path ) ? filesize( $zip_path ) : 0;
+		// Count total files
+		$total_files = 0;
+		$manifest_handle = fopen( $manifest_path, 'r' );
+		if ( $manifest_handle ) {
+			while ( fgets( $manifest_handle ) !== false ) {
+				$total_files++;
+			}
+			rewind( $manifest_handle );
+		}
+
+		// Prepare ZIP
+		$zip = new ZipArchive();
+		$zip_flags = $is_resume ? 0 : ( ZipArchive::CREATE | ZipArchive::OVERWRITE );
+		if ( $zip->open( $zip_path, $zip_flags ) !== true ) {
+			if ( $manifest_handle ) fclose( $manifest_handle );
+			return new WP_Error( 'zip_failed', 'Could not create or open ZIP archive.', array( 'status' => 500 ) );
+		}
+
+		$processed_in_this_chunk = 0;
+		$done = true;
+		$current_line = 0;
+
+		if ( $manifest_handle ) {
+			// Skip to offset
+			while ( $current_line < $offset && ! feof( $manifest_handle ) ) {
+				fgets( $manifest_handle );
+				$current_line++;
+			}
+
+			// Process files
+			while ( ( $row = fgetcsv( $manifest_handle ) ) !== false ) {
+				if ( count( $row ) === 2 ) {
+					$zip->addFile( $row[0], $row[1] );
+					$processed_in_this_chunk++;
+				}
+
+				if ( microtime( true ) - $start_time >= $max_execution_time ) {
+					$done = false;
+					break;
+				}
+			}
+			fclose( $manifest_handle );
+		}
+
+		$zip->close();
+		$new_offset = $offset + $processed_in_this_chunk;
+
+		// Clean up manifest if done
+		if ( $done && file_exists( $manifest_path ) ) {
+			unlink( $manifest_path );
+		}
 
 		return rest_ensure_response( $this->encrypt_payload( array(
 			'success'    => true,
 			'type'       => $type,
-			'file_count' => $file_count,
-			'zip_size'   => $zip_size,
+			'offset'     => $new_offset,
+			'total'      => $total_files,
+			'file_count' => $new_offset,
+			'zip_size'   => file_exists( $zip_path ) ? filesize( $zip_path ) : 0,
+			'done'       => $done,
 		) ) );
 	}
 
@@ -734,13 +933,17 @@ class Xophz_Compass_Moving_Castle_API {
 			return new WP_Error( 'invalid_token', 'Invalid or expired token.', array( 'status' => 403 ) );
 		}
 
-		$type     = sanitize_text_field( $request->get_param( 'type' ) );
-		$token    = sanitize_text_field( $request->get_param( 'token' ) );
-		$zip_path = $this->get_tmp_zip_path( $token, $type );
-		$deleted  = false;
+		$type          = sanitize_text_field( $request->get_param( 'type' ) );
+		$token         = sanitize_text_field( $request->get_param( 'token' ) );
+		$zip_path      = $this->get_tmp_zip_path( $token, $type );
+		$manifest_path = $zip_path . '.manifest';
+		$deleted       = false;
 
 		if ( file_exists( $zip_path ) ) {
 			$deleted = unlink( $zip_path );
+		}
+		if ( file_exists( $manifest_path ) ) {
+			unlink( $manifest_path );
 		}
 
 		return rest_ensure_response( array(
@@ -1032,9 +1235,12 @@ class Xophz_Compass_Moving_Castle_API {
 		}
 
 		$file_tasks = array(
-			'pull_media'   => array( 'type' => 'media',   'dest' => wp_upload_dir()['basedir'],   'label' => 'Media' ),
-			'pull_themes'  => array( 'type' => 'themes',  'dest' => WP_CONTENT_DIR . '/themes',   'label' => 'Themes' ),
-			'pull_plugins' => array( 'type' => 'plugins', 'dest' => WP_CONTENT_DIR . '/plugins',  'label' => 'Plugins' ),
+			'pull_media'      => array( 'type' => 'media',      'dest' => wp_upload_dir()['basedir'],   'label' => 'Media' ),
+			'pull_themes'     => array( 'type' => 'themes',     'dest' => WP_CONTENT_DIR . '/themes',   'label' => 'Themes' ),
+			'pull_plugins'    => array( 'type' => 'plugins',    'dest' => WP_CONTENT_DIR . '/plugins',  'label' => 'Plugins' ),
+			'pull_mu-plugins' => array( 'type' => 'mu-plugins', 'dest' => defined( 'WPMU_PLUGIN_DIR' ) ? WPMU_PLUGIN_DIR : WP_CONTENT_DIR . '/mu-plugins', 'label' => 'MU Plugins' ),
+			'pull_languages'  => array( 'type' => 'languages',  'dest' => defined( 'WP_LANG_DIR' ) ? WP_LANG_DIR : WP_CONTENT_DIR . '/languages', 'label' => 'Languages' ),
+			'pull_others'     => array( 'type' => 'others',     'dest' => WP_CONTENT_DIR, 'label' => 'Others' ),
 		);
 
 		$is_file_task = isset( $file_tasks[ $task ] );
@@ -1047,21 +1253,30 @@ class Xophz_Compass_Moving_Castle_API {
 	}
 
 	private function pull_files( $base_url, $token, $type, $dest_dir, $label, $is_dry ) {
-		$prepare_url   = $base_url . '/wp-json/moving-castle/v1/files/prepare?token=' . $token . '&type=' . $type;
-		$prep_response = wp_remote_get( $prepare_url, array( 'timeout' => 300 ) );
+		$offset = 0;
+		$done   = false;
+		$prep_body = array();
 
-		if ( is_wp_error( $prep_response ) ) {
-			return new WP_Error( 'prepare_failed', 'Could not prepare ' . $label . ' ZIP: ' . $prep_response->get_error_message(), array( 'status' => 500 ) );
+		while ( ! $done ) {
+			$prepare_url   = $base_url . '/wp-json/moving-castle/v1/files/prepare?token=' . $token . '&type=' . $type . '&offset=' . $offset;
+			$prep_response = wp_remote_get( $prepare_url, array( 'timeout' => 300 ) );
+
+			if ( is_wp_error( $prep_response ) ) {
+				return new WP_Error( 'prepare_failed', 'Could not prepare ' . $label . ' ZIP: ' . $prep_response->get_error_message(), array( 'status' => 500 ) );
+			}
+
+			$prep_raw  = json_decode( wp_remote_retrieve_body( $prep_response ), true );
+			$prep_body = $this->decrypt_payload( $prep_raw );
+
+			if ( empty( $prep_body['success'] ) ) {
+				return new WP_Error( 'prepare_failed', 'Source failed to create ' . $label . ' archive.', array( 'status' => 500 ) );
+			}
+
+			$done   = ! empty( $prep_body['done'] );
+			$offset = isset( $prep_body['offset'] ) ? absint( $prep_body['offset'] ) : 0;
 		}
 
-		$prep_raw  = json_decode( wp_remote_retrieve_body( $prep_response ), true );
-		$prep_body = $this->decrypt_payload( $prep_raw );
-
-		if ( empty( $prep_body['success'] ) ) {
-			return new WP_Error( 'prepare_failed', 'Source failed to create ' . $label . ' archive.', array( 'status' => 500 ) );
-		}
-
-		$file_count = $prep_body['file_count'];
+		$file_count = $prep_body['total'] ?? ( $prep_body['file_count'] ?? 0 );
 		$zip_size   = $prep_body['zip_size'];
 
 		if ( $is_dry ) {

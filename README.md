@@ -1,20 +1,20 @@
 # Xophz Your Moving Castle
 
-> **Category:** Castle Walls · **Version:** 0.0.1
+> **Category:** Castle Walls · **Version:** 26.4.27.875
 
 Open your door to many ventures, markets, and brands without moving your site.
 
 ## Description
 
-**Moving Castle** is a planned environment and multisite management plugin for the COMPASS ecosystem. Inspired by the magical, dial-turning door in *Howl's Moving Castle*, it is designed to manage WordPress Multisite networks, staging environments, and on-the-fly theme swapping without affecting live users.
+**Moving Castle** is a powerful environment and site migration plugin for the COMPASS ecosystem. Inspired by the magical, dial-turning door in *Howl's Moving Castle*, it is designed to seamlessly migrate WordPress sites, databases, media, themes, and plugins from one environment to another using a robust SQL dump-and-import architecture.
 
-### Planned Capabilities
+### Capabilities
 
-- **Theme Routing (The "Reflection" Mode)** – Session-based theme previewing without touching the live public site, generating secure "Castle Links" for clients.
-- **Per-Page Theme Enchants** – Meta boxes allowing individual pages to utilize completely different themes.
-- **Multisite Dial** – A central, graphical UI to switch between and manage sites in a WordPress Multisite network.
-- **The Escape Hatch** – 1-click jumps between Production and Staging views.
-- **Content Synchronization** – Sync posts, pages, and media between network sites.
+- **Site-to-Site Migration** – Secure, direct server-to-server transfers via tokenized REST APIs.
+- **Bulk SQL Dump Architecture** – Bypasses traditional row-by-row timeouts by generating and compressing full SQL dumps server-side.
+- **On-the-Fly Domain Replacement** – Transparently handles `unserialize_replace` logic during the migration process for flawless URL handovers.
+- **Asset Synchronization** – Selectively migrate media libraries, active themes, and plugins, complete with automated activation on the target site.
+- **Visual Terminal** – A high-tech, gamified Overseer Migration Terminal UI providing real-time logging, metrics, and progress visualization.
 
 ## Requirements
 
@@ -23,7 +23,7 @@ Open your door to many ventures, markets, and brands without moving your site.
 
 ## Status
 
-🔴 **In Development** - Currently scaffolded with base WordPress plugin Architecture. Core mechanics (theme interception, multisite dial) are defined but not yet implemented.
+🟢 **Stable** - Fully implements the server-side dump/import pipeline and the multi-view Moving Castle sub-app UI.
 
 ## Installation
 
@@ -36,10 +36,7 @@ Open your door to many ventures, markets, and brands without moving your site.
 
 | Route | View | Description |
 |---|---|---|
-| `/moving-castle` | Dashboard | Portal Dial and Wardrobe (theme previewing) interface |
-
-## Changelog
-
-### 0.0.1
-
-- Initial scaffolding with plugin bootstrap and COMPASS integration
+| `/moving-castle` | Subsites | View discovered multisite instances and generate connection links. |
+| `/moving-castle/import` | Import | The migration wizard and Overseer Terminal for executing imports. |
+| `/moving-castle/history` | History | Audit trail of previous migration tasks. |
+| `/moving-castle/settings` | Settings | Token TTL and data scope configurations. |

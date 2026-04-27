@@ -16,10 +16,11 @@ trait Trait_Moving_Castle_API_Schema {
 		$prefix        = $this->resolve_prefix( $site_id );
 
 		$response = array(
-			'success' => true,
-			'mode'    => $is_standalone ? 'standalone' : 'multisite',
-			'prefix'  => $prefix,
-			'scope'   => $scope,
+			'success'     => true,
+			'mode'        => $is_standalone ? 'standalone' : 'multisite',
+			'prefix'      => $prefix,
+			'scope'       => $scope,
+			'api_version' => 2,
 		);
 
 		$has_database_scope = in_array( 'database', $scope, true );

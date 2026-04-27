@@ -168,6 +168,11 @@ trait Trait_Moving_Castle_API_Import {
 			));
 		}
 
+		if ( $task === 'pull_database' ) {
+			$dest_url = isset( $params['dest_url'] ) ? sanitize_text_field( $params['dest_url'] ) : get_site_url();
+			return $this->pull_database( $base_url, $token, $is_dry, $dest_url );
+		}
+
 		if ( $task === 'activate_extensions' ) {
 			if ( $is_dry ) {
 				return rest_ensure_response( array( 'success' => true, 'message' => 'Dry run: Theme and plugins would be activated.' ) );
@@ -257,13 +262,69 @@ trait Trait_Moving_Castle_API_Import {
 		return new WP_Error( 'invalid_task', 'Invalid task specified.', array( 'status' => 400 ) );
 	}
 
-	private function pull_files( $base_url, $token, $type, $dest_dir, $label, $is_dry ) {
+	private function pull_database( $base_url, $token, $is_dry, $dest_url ) {
+		set_time_limit( 0 );
+		$dest_dir = sys_get_temp_dir() . '/mc-db-extract-' . md5( $token );
+		if ( ! is_dir( $dest_dir ) ) wp_mkdir_p( $dest_dir );
+
+		$result = $this->pull_files( $base_url, $token, 'database', $dest_dir, 'Database', $is_dry, array( 'dest_url' => urlencode( $dest_url ) ) );
+		if ( is_wp_error( $result ) || $is_dry ) {
+			return $result;
+		}
+
+		$sql_file = $dest_dir . '/database.sql';
+		if ( ! file_exists( $sql_file ) ) {
+			return new WP_Error( 'sql_missing', 'Database SQL file not found in archive.', array( 'status' => 500 ) );
+		}
+
+		global $wpdb;
+		$current_user_id   = get_current_user_id();
+		$current_user_meta = $wpdb->get_row( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->usermeta} WHERE user_id = %d AND meta_key = 'session_tokens'", $current_user_id ) );
+
+		$handle = fopen( $sql_file, 'r' );
+		$query = '';
+		while ( ( $line = fgets( $handle ) ) !== false ) {
+			if ( trim( $line ) === '' || strpos( ltrim( $line ), '--' ) === 0 ) continue;
+			$query .= $line;
+			if ( substr( rtrim( $query ), -1 ) === ';' ) {
+				$wpdb->query( $query );
+				$query = '';
+			}
+		}
+		fclose( $handle );
+		unlink( $sql_file );
+		rmdir( $dest_dir );
+
+		if ( $current_user_id && $current_user_meta ) {
+			// Restore the user's session token to ensure they aren't logged out
+			$exists = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->usermeta} WHERE user_id = %d AND meta_key = 'session_tokens'", $current_user_id ) );
+			if ( $exists ) {
+				$wpdb->update( $wpdb->usermeta, array( 'meta_value' => $current_user_meta->meta_value ), array( 'user_id' => $current_user_id, 'meta_key' => 'session_tokens' ) );
+			} else {
+				$wpdb->insert( $wpdb->usermeta, array( 'user_id' => $current_user_id, 'meta_key' => 'session_tokens', 'meta_value' => $current_user_meta->meta_value ) );
+			}
+		}
+
+		return rest_ensure_response( array(
+			'success' => true,
+			'message' => 'Database imported successfully.'
+		));
+	}
+
+	private function pull_files( $base_url, $token, $type, $dest_dir, $label, $is_dry, $extra_params = array() ) {
 		$offset = 0;
 		$done   = false;
 		$prep_body = array();
 
+		$extra_query = '';
+		if ( ! empty( $extra_params ) ) {
+			foreach ( $extra_params as $k => $v ) {
+				$extra_query .= '&' . $k . '=' . $v;
+			}
+		}
+
 		while ( ! $done ) {
-			$prepare_url   = $base_url . '/wp-json/moving-castle/v1/files/prepare?token=' . $token . '&type=' . $type . '&offset=' . $offset;
+			$prepare_url   = $base_url . '/wp-json/moving-castle/v1/files/prepare?token=' . $token . '&type=' . $type . '&offset=' . $offset . $extra_query;
 			$prep_response = wp_remote_get( $prepare_url, array( 'timeout' => 300 ) );
 
 			if ( is_wp_error( $prep_response ) ) {
@@ -307,6 +368,7 @@ trait Trait_Moving_Castle_API_Import {
 			return new WP_Error( 'download_failed', 'Could not download ' . $label . ' ZIP: ' . $download_response->get_error_message(), array( 'status' => 500 ) );
 		}
 
+		require_once ABSPATH . 'wp-admin/includes/file.php';
 		WP_Filesystem();
 		$unzip_result = unzip_file( $local_zip, $dest_dir );
 

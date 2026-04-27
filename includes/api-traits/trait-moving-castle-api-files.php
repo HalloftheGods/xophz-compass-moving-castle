@@ -88,9 +88,13 @@ trait Trait_Moving_Castle_API_Files {
 		}
 
 		$type = sanitize_text_field( $request->get_param( 'type' ) );
-		$allowed_types = array( 'media', 'themes', 'plugins', 'mu-plugins', 'languages', 'others' );
+		$allowed_types = array( 'database', 'media', 'themes', 'plugins', 'mu-plugins', 'languages', 'others' );
 		if ( ! in_array( $type, $allowed_types, true ) ) {
 			return new WP_Error( 'invalid_type', 'Invalid file type.', array( 'status' => 400 ) );
+		}
+
+		if ( $type === 'database' ) {
+			return $this->dump_database( $request );
 		}
 
 		$site_id       = $token_data['site_id'];

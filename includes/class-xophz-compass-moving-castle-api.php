@@ -6,6 +6,7 @@ require_once plugin_dir_path( __FILE__ ) . 'api-traits/trait-moving-castle-api-s
 require_once plugin_dir_path( __FILE__ ) . 'api-traits/trait-moving-castle-api-data.php';
 require_once plugin_dir_path( __FILE__ ) . 'api-traits/trait-moving-castle-api-files.php';
 require_once plugin_dir_path( __FILE__ ) . 'api-traits/trait-moving-castle-api-import.php';
+require_once plugin_dir_path( __FILE__ ) . 'api-traits/trait-moving-castle-api-database-dump.php';
 
 class Xophz_Compass_Moving_Castle_API {
 
@@ -15,6 +16,7 @@ class Xophz_Compass_Moving_Castle_API {
 	use Trait_Moving_Castle_API_Data;
 	use Trait_Moving_Castle_API_Files;
 	use Trait_Moving_Castle_API_Import;
+	use Trait_Moving_Castle_API_Database_Dump;
 
 	public function register_routes() {
 		register_rest_route( 'moving-castle/v1', '/sites', array(

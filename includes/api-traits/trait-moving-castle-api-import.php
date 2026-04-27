@@ -324,7 +324,8 @@ trait Trait_Moving_Castle_API_Import {
 		}
 
 		while ( ! $done ) {
-			$prepare_url   = $base_url . '/wp-json/moving-castle/v1/files/prepare?token=' . $token . '&type=' . $type . '&offset=' . $offset . $extra_query;
+			$fresh_param = ( $offset === 0 ) ? '&fresh=1' : '';
+			$prepare_url   = $base_url . '/wp-json/moving-castle/v1/files/prepare?token=' . $token . '&type=' . $type . '&offset=' . $offset . $fresh_param . $extra_query;
 			$prep_response = wp_remote_get( $prepare_url, array( 'timeout' => 300 ) );
 
 			if ( is_wp_error( $prep_response ) ) {

@@ -43,15 +43,16 @@ trait Trait_Moving_Castle_API_Import {
 		}
 
 		return rest_ensure_response( array(
-			'success'  => true,
-			'message'  => 'Connection established.',
-			'mode'     => isset( $body['mode'] ) ? $body['mode'] : 'unknown',
-			'scope'    => isset( $body['scope'] ) ? $body['scope'] : array( 'database' ),
-			'tables'   => isset( $body['tables'] ) ? $body['tables'] : array(),
-			'files'    => isset( $body['files'] ) ? $body['files'] : array(),
-			'prefix'   => $body['prefix'],
-			'token'    => $token,
-			'base_url' => $base_url
+			'success'     => true,
+			'message'     => 'Connection established.',
+			'mode'        => isset( $body['mode'] ) ? $body['mode'] : 'unknown',
+			'scope'       => isset( $body['scope'] ) ? $body['scope'] : array( 'database' ),
+			'tables'      => isset( $body['tables'] ) ? $body['tables'] : array(),
+			'files'       => isset( $body['files'] ) ? $body['files'] : array(),
+			'prefix'      => $body['prefix'],
+			'token'       => $token,
+			'base_url'    => $base_url,
+			'api_version' => isset( $body['api_version'] ) ? $body['api_version'] : 1
 		));
 	}
 

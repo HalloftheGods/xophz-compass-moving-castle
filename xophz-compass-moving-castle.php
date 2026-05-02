@@ -14,6 +14,7 @@
  *
  * @wordpress-plugin
  * Category:          Castle Walls
+ * Group:             BI
  * Plugin Name:       Xophz Your Moving Castle 
  * Plugin URI:        https://github.com/HalloftheGods/xophz-compass-moving-castle
  * Description:       Open your door to many ventures, markets, and brands without moving your site. 

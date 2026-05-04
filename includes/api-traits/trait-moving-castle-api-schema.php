@@ -205,6 +205,7 @@ trait Trait_Moving_Castle_API_Schema {
 			$size = 0;
 			$count = 0;
 			$exists = false;
+			$contents = array();
 
 			if ( is_dir( $others_dir ) ) {
 				$iterator = new DirectoryIterator( $others_dir );
@@ -222,6 +223,8 @@ trait Trait_Moving_Castle_API_Schema {
 					if ( $is_excluded ) continue;
 
 					$exists = true;
+					$contents[] = $fileinfo->getBasename();
+
 					if ( $fileinfo->isDir() ) {
 						$info = $this->get_dir_info( $path );
 						$size += $info['size'];
@@ -237,7 +240,8 @@ trait Trait_Moving_Castle_API_Schema {
 						'path'       => $others_dir,
 						'exists'     => true,
 						'size'       => $size,
-						'file_count' => $count
+						'file_count' => $count,
+						'contents'   => $contents
 					);
 				}
 			}

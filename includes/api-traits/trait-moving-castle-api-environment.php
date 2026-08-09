@@ -164,4 +164,48 @@ trait Trait_Moving_Castle_API_Environment {
 			)
 		));
 	}
+
+	public function get_networks( $request ) {
+		$networks_data = array();
+
+		if ( is_multisite() ) {
+			if ( function_exists( 'get_networks' ) ) {
+				$networks = get_networks( array( 'number' => 100 ) );
+				foreach ( $networks as $net ) {
+					$site_name   = get_network_option( $net->id, 'site_name', $net->domain );
+					$admin_email = get_network_option( $net->id, 'admin_email', '' );
+					$site_count  = count( get_sites( array( 'network_id' => $net->id, 'number' => 500 ) ) );
+
+					$networks_data[] = array(
+						'id'          => (int) $net->id,
+						'name'        => $site_name ? $site_name : $net->domain,
+						'domain'      => $net->domain,
+						'path'        => $net->path,
+						'site_count'  => $site_count,
+						'admin_email' => $admin_email,
+						'status'      => 'Active'
+					);
+				}
+			}
+		}
+
+		if ( empty( $networks_data ) ) {
+			$site_name = get_option( 'blogname', 'Primary Network' );
+			$domain    = wp_parse_url( site_url(), PHP_URL_HOST );
+			$networks_data[] = array(
+				'id'          => 1,
+				'name'        => $site_name,
+				'domain'      => $domain ? $domain : 'localhost',
+				'path'        => '/',
+				'site_count'  => is_multisite() ? count( get_sites() ) : 1,
+				'admin_email' => get_option( 'admin_email', '' ),
+				'status'      => 'Active'
+			);
+		}
+
+		return rest_ensure_response( array(
+			'success'  => true,
+			'networks' => $networks_data
+		));
+	}
 }

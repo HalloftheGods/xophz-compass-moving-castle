@@ -29,6 +29,16 @@ class Xophz_Compass_Moving_Castle_API {
 			)
 		));
 
+		register_rest_route( 'moving-castle/v1', '/networks', array(
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_networks' ),
+				'permission_callback' => function() {
+					return current_user_can( 'manage_options' );
+				}
+			)
+		));
+
 		register_rest_route( 'moving-castle/v1', '/connection', array(
 			array(
 				'methods'             => WP_REST_Server::CREATABLE,

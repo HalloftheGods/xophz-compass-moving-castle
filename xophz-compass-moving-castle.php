@@ -54,8 +54,7 @@ function activate_xophz_compass_moving_castle() {
  * This action is documented in includes/class-xophz-compass-moving-castle-deactivator.php
  */
 function deactivate_xophz_compass_moving_castle() {
-	require_once plugin_dir_path( __FILE__ ) . 'includes/class-xophz-compass-moving-castle-deactivator.php';
-	Xophz_Compass_Moving_Castle_Deactivator::deactivate();
+	Xophz_Compass_Moving_Castle::deactivate();
 }
 
 register_activation_hook( __FILE__, 'activate_xophz_compass_moving_castle' );

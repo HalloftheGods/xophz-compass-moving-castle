@@ -16,7 +16,7 @@ trait Trait_Moving_Castle_API_Database_Dump {
 		$dest_url      = untrailingslashit( $request->get_param('dest_url') ? esc_url_raw( urldecode( $request->get_param('dest_url') ) ) : $source_url );
 		$needs_replace = ( $source_url !== $dest_url );
 
-		$token    = sanitize_text_field( $request->get_param( 'token' ) );
+		$token    = $this->get_request_token( $request );
 		$zip_path = sys_get_temp_dir() . '/mc-database-' . md5( $token ) . '.zip';
 		$sql_path = sys_get_temp_dir() . '/mc-database-' . md5( $token ) . '.sql';
 

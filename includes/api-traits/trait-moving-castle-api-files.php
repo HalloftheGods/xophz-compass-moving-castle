@@ -99,7 +99,7 @@ trait Trait_Moving_Castle_API_Files {
 
 		$site_id       = $token_data['site_id'];
 		$is_standalone = ! empty( $token_data['standalone'] );
-		$token         = sanitize_text_field( $request->get_param( 'token' ) );
+		$token         = $this->get_request_token( $request );
 		$zip_path      = $this->get_tmp_zip_path( $token, $type );
 		$manifest_path = $zip_path . '.manifest';
 
@@ -335,7 +335,7 @@ trait Trait_Moving_Castle_API_Files {
 		}
 
 		$type     = sanitize_text_field( $request->get_param( 'type' ) );
-		$token    = sanitize_text_field( $request->get_param( 'token' ) );
+		$token    = $this->get_request_token( $request );
 		$zip_path = $this->get_tmp_zip_path( $token, $type );
 
 		if ( ! file_exists( $zip_path ) ) {
@@ -356,7 +356,7 @@ trait Trait_Moving_Castle_API_Files {
 		}
 
 		$type          = sanitize_text_field( $request->get_param( 'type' ) );
-		$token         = sanitize_text_field( $request->get_param( 'token' ) );
+		$token         = $this->get_request_token( $request );
 		$zip_path      = $this->get_tmp_zip_path( $token, $type );
 		$manifest_path = $zip_path . '.manifest';
 		$deleted       = false;

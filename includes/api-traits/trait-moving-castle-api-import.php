@@ -11,13 +11,19 @@ trait Trait_Moving_Castle_API_Import {
 		}
 
 		$parsed = wp_parse_url( $connection_url );
-		$has_query = isset( $parsed['query'] );
-		if ( ! $has_query ) {
+		$pairing = '';
+		if ( isset( $parsed['fragment'] ) ) {
+			$pairing = $parsed['fragment'];
+		} elseif ( isset( $parsed['query'] ) ) {
+			// Links issued before the token moved into the fragment.
+			$pairing = $parsed['query'];
+		}
+		if ( ! $pairing || empty( $parsed['scheme'] ) || empty( $parsed['host'] ) ) {
 			return new WP_Error( 'invalid_url', 'Invalid Connection URL format.', array( 'status' => 400 ) );
 		}
 
-		parse_str( $parsed['query'], $query_params );
-		$token = isset( $query_params['token'] ) ? $query_params['token'] : '';
+		parse_str( $pairing, $pairing_params );
+		$token = isset( $pairing_params['token'] ) ? $this->normalize_token( $pairing_params['token'] ) : '';
 
 		if ( ! $token ) {
 			return new WP_Error( 'invalid_url', 'Missing token in Connection URL.', array( 'status' => 400 ) );
@@ -26,15 +32,15 @@ trait Trait_Moving_Castle_API_Import {
 		$port_segment = isset( $parsed['port'] ) ? ':' . $parsed['port'] : '';
 		$base_url     = $parsed['scheme'] . '://' . $parsed['host'] . $port_segment;
 
-		$schema_url = $base_url . '/wp-json/moving-castle/v1/schema?token=' . $token;
-		$response   = wp_remote_get( $schema_url, array( 'timeout' => 30 ) );
+		$schema_url = $base_url . '/wp-json/moving-castle/v1/schema';
+		$response   = wp_remote_get( $schema_url, array( 'timeout' => 30, 'headers' => $this->auth_headers( $token ) ) );
 
 		if ( is_wp_error( $response ) ) {
 			return new WP_Error( 'fetch_failed', 'Could not connect to source site: ' . $response->get_error_message(), array( 'status' => 500 ) );
 		}
 
 		$raw_body       = json_decode( wp_remote_retrieve_body( $response ), true );
-		$body           = $this->decrypt_payload( $raw_body );
+		$body           = $this->decrypt_payload( $raw_body, $token );
 		$has_valid_body = ! empty( $body['success'] );
 
 		if ( ! $has_valid_body ) {
@@ -92,7 +98,7 @@ trait Trait_Moving_Castle_API_Import {
 	public function process_import_task( $request ) {
 		$params   = $request->get_json_params();
 		$base_url = esc_url_raw( $params['base_url'] );
-		$token    = sanitize_text_field( $params['token'] );
+		$token    = $this->normalize_token( $params['token'] );
 		$task     = sanitize_text_field( $params['task'] );
 		$is_dry   = ! empty( $params['dry_run'] );
 
@@ -104,15 +110,15 @@ trait Trait_Moving_Castle_API_Import {
 			$table = sanitize_text_field( $params['table'] );
 			$page  = absint( $params['page'] );
 			
-			$data_url = $base_url . '/wp-json/moving-castle/v1/data?token=' . $token . '&table=' . $table . '&page=' . $page;
-			$response = wp_remote_get( $data_url, array( 'timeout' => 60 ) );
+			$data_url = $base_url . '/wp-json/moving-castle/v1/data?table=' . rawurlencode( $table ) . '&page=' . $page;
+			$response = wp_remote_get( $data_url, array( 'timeout' => 60, 'headers' => $this->auth_headers( $token ) ) );
 
 			if ( is_wp_error( $response ) ) {
 				return new WP_Error( 'fetch_failed', 'Could not fetch data: ' . $response->get_error_message(), array( 'status' => 500 ) );
 			}
 
 			$raw_body = json_decode( wp_remote_retrieve_body( $response ), true );
-			$body     = $this->decrypt_payload( $raw_body );
+			$body     = $this->decrypt_payload( $raw_body, $token );
 
 			if ( empty( $body['success'] ) ) {
 				return new WP_Error( 'fetch_failed', 'Invalid data payload.', array( 'status' => 500 ) );
@@ -326,15 +332,15 @@ trait Trait_Moving_Castle_API_Import {
 
 		while ( ! $done ) {
 			$fresh_param = ( $offset === 0 ) ? '&fresh=1' : '';
-			$prepare_url   = $base_url . '/wp-json/moving-castle/v1/files/prepare?token=' . $token . '&type=' . $type . '&offset=' . $offset . $fresh_param . $extra_query;
-			$prep_response = wp_remote_get( $prepare_url, array( 'timeout' => 300 ) );
+			$prepare_url   = $base_url . '/wp-json/moving-castle/v1/files/prepare?type=' . $type . '&offset=' . $offset . $fresh_param . $extra_query;
+			$prep_response = wp_remote_get( $prepare_url, array( 'timeout' => 300, 'headers' => $this->auth_headers( $token ) ) );
 
 			if ( is_wp_error( $prep_response ) ) {
 				return new WP_Error( 'prepare_failed', 'Could not prepare ' . $label . ' ZIP: ' . $prep_response->get_error_message(), array( 'status' => 500 ) );
 			}
 
 			$prep_raw  = json_decode( wp_remote_retrieve_body( $prep_response ), true );
-			$prep_body = $this->decrypt_payload( $prep_raw );
+			$prep_body = $this->decrypt_payload( $prep_raw, $token );
 
 			if ( empty( $prep_body['success'] ) ) {
 				return new WP_Error( 'prepare_failed', 'Source failed to create ' . $label . ' archive.', array( 'status' => 500 ) );
@@ -356,13 +362,14 @@ trait Trait_Moving_Castle_API_Import {
 			));
 		}
 
-		$download_url = $base_url . '/wp-json/moving-castle/v1/files/download?token=' . $token . '&type=' . $type;
+		$download_url = $base_url . '/wp-json/moving-castle/v1/files/download?type=' . $type;
 		$local_zip    = sys_get_temp_dir() . '/mc-import-' . $type . '-' . md5( $token ) . '.zip';
 
 		$download_response = wp_remote_get( $download_url, array(
 			'timeout'  => 600,
 			'stream'   => true,
 			'filename' => $local_zip,
+			'headers'  => $this->auth_headers( $token ),
 		) );
 
 		if ( is_wp_error( $download_response ) ) {
@@ -395,8 +402,8 @@ trait Trait_Moving_Castle_API_Import {
 	private function remote_cleanup( $base_url, $token, $type ) {
 		wp_remote_post( $base_url . '/wp-json/moving-castle/v1/files/cleanup', array(
 			'timeout' => 15,
-			'body'    => wp_json_encode( array( 'token' => $token, 'type' => $type ) ),
-			'headers' => array( 'Content-Type' => 'application/json' ),
+			'body'    => wp_json_encode( array( 'type' => $type ) ),
+			'headers' => array_merge( array( 'Content-Type' => 'application/json' ), $this->auth_headers( $token ) ),
 		) );
 	}
 

@@ -19,8 +19,8 @@
  * Plugin URI:        https://github.com/HalloftheGods/xophz-compass-moving-castle
  * Description:       Open your door to many ventures, markets, and brands without moving your site. 
  * Version:           26.11.6-1340
- * Author:            Hall of the Gods, Inc.
- * Author URI:        http://www.hallofthegods.com/
+ * Author:            My Compass Consulting
+ * Author URI:        https://mycompassconsulting.com/
  * License:           GPL-2.0+
  * License URI:       http://www.gnu.org/licenses/gpl-2.0.txt
  * Text Domain:       xophz-compass-moving-castle

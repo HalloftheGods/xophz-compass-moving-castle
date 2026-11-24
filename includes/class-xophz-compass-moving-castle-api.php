@@ -1,7 +1,9 @@
 <?php
 
+require_once plugin_dir_path( __FILE__ ) . 'class-moving-castle-network-manager.php';
 require_once plugin_dir_path( __FILE__ ) . 'api-traits/trait-moving-castle-api-security.php';
 require_once plugin_dir_path( __FILE__ ) . 'api-traits/trait-moving-castle-api-environment.php';
+require_once plugin_dir_path( __FILE__ ) . 'api-traits/trait-moving-castle-api-networks.php';
 require_once plugin_dir_path( __FILE__ ) . 'api-traits/trait-moving-castle-api-schema.php';
 require_once plugin_dir_path( __FILE__ ) . 'api-traits/trait-moving-castle-api-data.php';
 require_once plugin_dir_path( __FILE__ ) . 'api-traits/trait-moving-castle-api-files.php';
@@ -12,6 +14,7 @@ class Xophz_Compass_Moving_Castle_API {
 
 	use Trait_Moving_Castle_API_Security;
 	use Trait_Moving_Castle_API_Environment;
+	use Trait_Moving_Castle_API_Networks;
 	use Trait_Moving_Castle_API_Schema;
 	use Trait_Moving_Castle_API_Data;
 	use Trait_Moving_Castle_API_Files;
@@ -26,6 +29,40 @@ class Xophz_Compass_Moving_Castle_API {
 				'permission_callback' => function() {
 					return current_user_can( 'manage_options' );
 				}
+			),
+			array(
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'create_site' ),
+				'permission_callback' => function() {
+					return current_user_can( 'manage_network' );
+				}
+			)
+		));
+
+		register_rest_route( 'moving-castle/v1', '/sites/(?P<id>\d+)', array(
+			array(
+				'methods'             => WP_REST_Server::EDITABLE,
+				'callback'            => array( $this, 'update_site' ),
+				'permission_callback' => function() {
+					return current_user_can( 'manage_network' );
+				}
+			),
+			array(
+				'methods'             => WP_REST_Server::DELETABLE,
+				'callback'            => array( $this, 'delete_site' ),
+				'permission_callback' => function() {
+					return current_user_can( 'manage_network' );
+				}
+			)
+		));
+
+		register_rest_route( 'moving-castle/v1', '/sites/(?P<id>\d+)/move', array(
+			array(
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'move_site' ),
+				'permission_callback' => function() {
+					return current_user_can( 'manage_network' );
+				}
 			)
 		));
 
@@ -35,6 +72,30 @@ class Xophz_Compass_Moving_Castle_API {
 				'callback'            => array( $this, 'get_networks' ),
 				'permission_callback' => function() {
 					return current_user_can( 'manage_options' );
+				}
+			),
+			array(
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'create_network' ),
+				'permission_callback' => function() {
+					return current_user_can( 'manage_network' );
+				}
+			)
+		));
+
+		register_rest_route( 'moving-castle/v1', '/networks/(?P<id>\d+)', array(
+			array(
+				'methods'             => WP_REST_Server::EDITABLE,
+				'callback'            => array( $this, 'update_network' ),
+				'permission_callback' => function() {
+					return current_user_can( 'manage_network' );
+				}
+			),
+			array(
+				'methods'             => WP_REST_Server::DELETABLE,
+				'callback'            => array( $this, 'delete_network' ),
+				'permission_callback' => function() {
+					return current_user_can( 'manage_network' );
 				}
 			)
 		));

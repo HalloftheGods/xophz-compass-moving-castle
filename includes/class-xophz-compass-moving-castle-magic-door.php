@@ -58,6 +58,26 @@ class Xophz_Compass_Moving_Castle_Magic_Door {
 				}
 			)
 		));
+
+		register_rest_route( 'moving-castle/v1', '/magic-door/sunrise-status', array(
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_sunrise_status' ),
+				'permission_callback' => function() {
+					return current_user_can( 'manage_network' ) || current_user_can( 'manage_options' );
+				}
+			)
+		));
+
+		register_rest_route( 'moving-castle/v1', '/magic-door/import-legacy-domains', array(
+			array(
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'import_legacy_domains' ),
+				'permission_callback' => function() {
+					return current_user_can( 'manage_network' );
+				}
+			)
+		));
 	}
 
 	public function get_themes( $request ) {
@@ -147,7 +167,20 @@ class Xophz_Compass_Moving_Castle_Magic_Door {
 			return new WP_Error( 'not_found', 'Door not found.', array( 'status' => 404 ) );
 		}
 
-		$allowed_fields = array( 'label', 'triggerType', 'trigger', 'themeSlug', 'themeName', 'color' );
+		$allowed_fields = array(
+			'label',
+			'triggerType',
+			'trigger',
+			'themeSlug',
+			'themeName',
+			'color',
+			'siteTitle',
+			'siteTagline',
+			'seoMode',
+			'experimentId',
+			'targetBlogId',
+			'frontPageId',
+		);
 		foreach ( $allowed_fields as $field ) {
 			if ( isset( $params[ $field ] ) ) {
 				$doors[ $idx ][ $field ] = sanitize_text_field( $params[ $field ] );
@@ -233,23 +266,45 @@ class Xophz_Compass_Moving_Castle_Magic_Door {
 
 		if ( ! $matched_door ) return;
 
-		$matched_theme = $matched_door['themeSlug'];
-		$theme = wp_get_theme( $matched_theme );
-		if ( ! $theme->exists() ) return;
+		if ( ! defined( 'MC_ACTIVE_DOOR_ID' ) ) {
+			define( 'MC_ACTIVE_DOOR_ID', (string) ( $matched_door['id'] ?? '' ) );
+		}
+		do_action( 'moving_castle_door_matched', $matched_door );
 
-		$override_template = function() use ( $matched_theme ) {
-			return $matched_theme;
-		};
+		$matched_theme = (string) ( $matched_door['themeSlug'] ?? '' );
+		if ( '' !== $matched_theme ) {
+			$theme = wp_get_theme( $matched_theme );
+			if ( $theme->exists() ) {
+				$override_template = function() use ( $matched_theme ) {
+					return $matched_theme;
+				};
+				add_filter( 'template', $override_template );
+				add_filter( 'stylesheet', $override_template );
+			}
+		}
 
-		add_filter( 'template', $override_template );
-		add_filter( 'stylesheet', $override_template );
+		// Brand identity overrides per Magic Door
+		if ( ! empty( $matched_door['siteTitle'] ) ) {
+			$door_title = (string) $matched_door['siteTitle'];
+			add_filter( 'option_blogname', function() use ( $door_title ) { return $door_title; } );
+		}
+		if ( ! empty( $matched_door['siteTagline'] ) ) {
+			$door_tagline = (string) $matched_door['siteTagline'];
+			add_filter( 'option_blogdescription', function() use ( $door_tagline ) { return $door_tagline; } );
+		}
+		if ( ! empty( $matched_door['frontPageId'] ) ) {
+			$front_id = (int) $matched_door['frontPageId'];
+			add_filter( 'option_show_on_front', function() { return 'page'; } );
+			add_filter( 'option_page_on_front', function() use ( $front_id ) { return $front_id; } );
+		}
 
-		// Overrides for domain mapping
+		// Overrides for domain mapping & SEO canonical safety
 		if ( in_array( $matched_door['triggerType'], array( 'domain', 'subdomain' ), true ) ) {
-			$protocol = is_ssl() ? 'https://' : 'http://';
-			$mapped_url = $protocol . $_SERVER['HTTP_HOST'];
-			
-			$override_url = function( $url ) use ( $mapped_url ) {
+			$primary_home = get_option( 'home' );
+			$protocol     = is_ssl() ? 'https://' : 'http://';
+			$mapped_url   = $protocol . $_SERVER['HTTP_HOST'];
+
+			$override_url = function() use ( $mapped_url ) {
 				return $mapped_url;
 			};
 
@@ -258,7 +313,97 @@ class Xophz_Compass_Moving_Castle_Magic_Door {
 
 			// Prevent WP from redirecting back to the original domain
 			remove_action( 'template_redirect', 'redirect_canonical' );
+
+			$seo_mode = (string) ( $matched_door['seoMode'] ?? 'canonical_primary' );
+			if ( 'noindex' === $seo_mode ) {
+				add_action( 'wp_head', function() {
+					echo '<meta name="robots" content="noindex,nofollow" />' . "\n";
+				}, 1 );
+			} elseif ( 'canonical_primary' === $seo_mode && ! empty( $primary_home ) ) {
+				$req_uri = (string) ( $_SERVER['REQUEST_URI'] ?? '/' );
+				$canon   = rtrim( $primary_home, '/' ) . $req_uri;
+				remove_action( 'wp_head', 'rel_canonical' );
+				add_action( 'wp_head', function() use ( $canon ) {
+					echo '<link rel="canonical" href="' . esc_url( $canon ) . '" />' . "\n";
+				}, 1 );
+			}
 		}
+	}
+
+	/**
+	 * Report sunrise.php status and count of legacy wp_domain_mapping rows.
+	 */
+	public function get_sunrise_status() {
+		global $wpdb;
+		$sunrise_path = WP_CONTENT_DIR . '/sunrise.php';
+		$status       = 'missing';
+		if ( file_exists( $sunrise_path ) ) {
+			$contents = (string) file_get_contents( $sunrise_path );
+			$status   = false !== strpos( $contents, 'MOVING_CASTLE_SUNRISE' ) ? 'managed' : 'third_party';
+		}
+
+		$legacy_table = $wpdb->base_prefix . 'domain_mapping';
+		$legacy_count = 0;
+		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $legacy_table ) ) === $legacy_table ) {
+			$legacy_count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$legacy_table}" );
+		}
+
+		return rest_ensure_response( array(
+			'success'        => true,
+			'sunrise_status' => $status,
+			'sunrise_active' => defined( 'SUNRISE' ) && SUNRISE,
+			'legacy_domains' => $legacy_count,
+		));
+	}
+
+	/**
+	 * Import existing rows from wp_domain_mapping into Moving Castle Magic Doors.
+	 */
+	public function import_legacy_domains() {
+		global $wpdb;
+		$legacy_table = $wpdb->base_prefix . 'domain_mapping';
+		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $legacy_table ) ) !== $legacy_table ) {
+			return rest_ensure_response( array( 'success' => true, 'imported' => 0, 'doors' => $this->get_doors_data() ) );
+		}
+
+		$rows     = $wpdb->get_results( "SELECT blog_id, domain, active FROM {$legacy_table} ORDER BY blog_id ASC", ARRAY_A );
+		$doors    = $this->get_doors_data();
+		$existing = array();
+		foreach ( $doors as $d ) {
+			$existing[ strtolower( (string) ( $d['trigger'] ?? '' ) ) ] = true;
+		}
+
+		$imported = 0;
+		foreach ( (array) $rows as $row ) {
+			$domain = strtolower( trim( (string) ( $row['domain'] ?? '' ) ) );
+			if ( '' === $domain || isset( $existing[ $domain ] ) ) {
+				continue;
+			}
+			$doors[] = array(
+				'id'           => 'door_' . substr( md5( $domain ), 0, 10 ),
+				'label'        => $domain,
+				'triggerType'  => 'domain',
+				'trigger'      => $domain,
+				'themeSlug'    => '',
+				'themeName'    => 'Site Default',
+				'color'        => 'cyan',
+				'seoMode'      => 'canonical_primary',
+				'targetBlogId' => (int) ( $row['blog_id'] ?? 1 ),
+				'active'       => ! empty( $row['active'] ),
+			);
+			$existing[ $domain ] = true;
+			$imported++;
+		}
+
+		if ( $imported > 0 ) {
+			$this->save_doors_data( $doors );
+		}
+
+		return rest_ensure_response( array(
+			'success'  => true,
+			'imported' => $imported,
+			'doors'    => $doors,
+		));
 	}
 
 	private function evaluate_trigger( $door ) {

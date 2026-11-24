@@ -22,7 +22,8 @@ trait Trait_Moving_Castle_API_Environment {
 		$is_network_admin = $this->is_multisite_network();
 
 		if ( $is_network_admin ) {
-			return $this->get_network_sites();
+			$network_id = (int) $request->get_param( 'network_id' );
+			return $this->get_network_sites( $network_id );
 		}
 
 		$is_subsite = is_multisite() && ! $is_network_admin;
@@ -90,8 +91,12 @@ trait Trait_Moving_Castle_API_Environment {
 		);
 	}
 
-	private function get_network_sites() {
-		$sites    = get_sites();
+	private function get_network_sites( int $network_id = 0 ) {
+		$query_args = array( 'number' => 0 );
+		if ( $network_id > 0 ) {
+			$query_args['network_id'] = $network_id;
+		}
+		$sites    = get_sites( $query_args );
 		$response = array();
 
 		foreach ( $sites as $site ) {
@@ -104,14 +109,22 @@ trait Trait_Moving_Castle_API_Environment {
 				$theme_name = 'Parent: ' . $theme_obj->parent()->get( 'Name' ) . ', Child: ' . $theme_name;
 			}
 
+			$site_status = Moving_Castle_Network_Manager::resolve_site_status( $site );
+
 			$response[] = array(
-				'id'            => $site->blog_id,
-				'name'          => $details->blogname,
+				'id'            => (int) $site->blog_id,
+				'network_id'    => (int) $site->site_id,
+				'is_main_site'  => is_main_site( (int) $site->blog_id, (int) $site->site_id ),
+				'name'          => $details ? $details->blogname : $site->domain,
 				'domain'        => $site->domain . $site->path,
+				'raw_domain'    => $site->domain,
+				'path'          => $site->path,
 				'theme'         => $theme_name,
 				'type'          => 'subsite',
 				'color'         => 'cyan',
-				'status'        => 'Active',
+				'status'        => $site_status,
+				'archived'      => ! empty( $site->archived ),
+				'public'        => ! empty( $site->public ),
 				'table_count'   => $stats['table_count'],
 				'plugins_count' => $stats['plugins_count'],
 				'media_count'   => $stats['media_count']
@@ -119,8 +132,9 @@ trait Trait_Moving_Castle_API_Environment {
 		}
 
 		return rest_ensure_response( array(
-			'mode'  => 'multisite',
-			'sites' => $response
+			'mode'               => 'multisite',
+			'can_manage_network' => current_user_can( 'manage_network' ),
+			'sites'              => $response
 		));
 	}
 
@@ -170,11 +184,12 @@ trait Trait_Moving_Castle_API_Environment {
 
 		if ( is_multisite() ) {
 			if ( function_exists( 'get_networks' ) ) {
-				$networks = get_networks( array( 'number' => 100 ) );
+				$current_net_id = get_current_network_id();
+				$networks       = get_networks( array( 'number' => 100 ) );
 				foreach ( $networks as $net ) {
 					$site_name   = get_network_option( $net->id, 'site_name', $net->domain );
 					$admin_email = get_network_option( $net->id, 'admin_email', '' );
-					$site_count  = count( get_sites( array( 'network_id' => $net->id, 'number' => 500 ) ) );
+					$site_count  = (int) get_sites( array( 'network_id' => $net->id, 'count' => true ) );
 
 					$networks_data[] = array(
 						'id'          => (int) $net->id,
@@ -183,6 +198,7 @@ trait Trait_Moving_Castle_API_Environment {
 						'path'        => $net->path,
 						'site_count'  => $site_count,
 						'admin_email' => $admin_email,
+						'is_current'  => ( (int) $net->id === (int) $current_net_id ),
 						'status'      => 'Active'
 					);
 				}
